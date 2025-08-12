@@ -1,3 +1,189 @@
+# name: CI/CD Pipeline
+
+# on:
+#   push:
+#     branches: [main, develop]
+#   pull_request:
+#     branches: [main]
+
+# env:
+#   AWS_REGION: us-east-1
+#   APPLICATION_NAME: full-cicd
+#   STACK_NAME: full-cicd-infrastructure
+
+# jobs:
+#   test:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: "18"
+#           cache: "npm"
+
+#       - name: Install dependencies
+#         run: npm ci
+
+#       - name: Run tests
+#         run: npm test -- --run --reporter=verbose
+
+#       - name: Build application
+#         run: npm run build
+
+#   deploy-infrastructure:
+#     needs: test
+#     runs-on: ubuntu-latest
+#     if: github.ref == 'refs/heads/main'
+#     outputs:
+#       s3-bucket: ${{ steps.stack-outputs.outputs.s3-bucket }}
+#       application-name: ${{ steps.stack-outputs.outputs.application-name }}
+#       environment-name: ${{ steps.stack-outputs.outputs.environment-name }}
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Configure AWS credentials
+#         uses: aws-actions/configure-aws-credentials@v4
+#         with:
+#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#           aws-region: ${{ env.AWS_REGION }}
+
+#       - name: Get latest Node.js solution stack
+#         id: solution-stack
+#         run: |
+#           STACK_NAME=$(aws elasticbeanstalk list-available-solution-stacks \
+#             --query 'SolutionStacks[?contains(@, `Node.js 18`) && contains(@, `Amazon Linux`)]' \
+#             --output text | head -1)
+#           echo "Found solution stack: $STACK_NAME"
+#           echo "stack-name=$STACK_NAME" >> $GITHUB_OUTPUT
+
+#       - name: Deploy CloudFormation stack
+#         run: |
+#           aws cloudformation deploy \
+#             --template-file cloudformation/infrastructure.yml \
+#             --stack-name ${{ env.STACK_NAME }} \
+#             --capabilities CAPABILITY_IAM \
+#             --parameter-overrides \
+#               ApplicationName=${{ env.APPLICATION_NAME }} \
+#               EnvironmentName=${{ env.APPLICATION_NAME }}-prod \
+#               SolutionStackName="64bit Amazon Linux 2023 v6.6.3 running Node.js 22" \
+#             --no-fail-on-empty-changeset
+
+#       - name: Get stack outputs
+#         id: stack-outputs
+#         run: |
+#           S3_BUCKET=$(aws cloudformation describe-stacks \
+#             --stack-name ${{ env.STACK_NAME }} \
+#             --query 'Stacks[0].Outputs[?OutputKey==`S3Bucket`].OutputValue' \
+#             --output text)
+
+#           APP_NAME=$(aws cloudformation describe-stacks \
+#             --stack-name ${{ env.STACK_NAME }} \
+#             --query 'Stacks[0].Outputs[?OutputKey==`ApplicationName`].OutputValue' \
+#             --output text)
+
+#           ENV_NAME=$(aws cloudformation describe-stacks \
+#             --stack-name ${{ env.STACK_NAME }} \
+#             --query 'Stacks[0].Outputs[?OutputKey==`EnvironmentName`].OutputValue' \
+#             --output text)
+
+#           echo "s3-bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
+#           echo "application-name=$APP_NAME" >> $GITHUB_OUTPUT
+#           echo "environment-name=$ENV_NAME" >> $GITHUB_OUTPUT
+
+#   deploy-application:
+#     needs: [test, deploy-infrastructure]
+#     runs-on: ubuntu-latest
+#     if: github.ref == 'refs/heads/main'
+
+#     steps:
+#       - name: Checkout code
+#         uses: actions/checkout@v4
+
+#       - name: Setup Node.js
+#         uses: actions/setup-node@v4
+#         with:
+#           node-version: "18"
+#           cache: "npm"
+
+#       - name: Install dependencies
+#         run: npm ci
+
+#       - name: Build application
+#         run: npm run build
+
+#       - name: Configure AWS credentials
+#         uses: aws-actions/configure-aws-credentials@v4
+#         with:
+#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#           aws-region: ${{ env.AWS_REGION }}
+
+#       - name: Create deployment package
+#         run: |
+#           # Create deployment package with built app
+#           echo "Creating deployment package..."
+#           mkdir -p deployment-package
+
+#           cp -r dist deployment-package/
+
+#           cp package.json deployment-package/
+#           cp -r .ebextensions deployment-package/ 2>/dev/null || true
+#           cp Procfile deployment-package/ 2>/dev/null || true
+
+#           echo "Contents of deployment-package:"
+#           find deployment-package -type f
+
+#           # Create zip file
+#           cd deployment-package
+#           zip -r ../deployment-package.zip .
+#           cd ..
+
+#           echo "Contents of zip file:"
+#           unzip -l deployment-package.zip | head -20
+
+#       - name: Upload to S3
+#         run: |
+#           VERSION_LABEL="v${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)"
+#           aws s3 cp deployment-package.zip s3://${{ needs.deploy-infrastructure.outputs.s3-bucket }}/${VERSION_LABEL}.zip
+#           echo "VERSION_LABEL=${VERSION_LABEL}" >> $GITHUB_ENV
+
+#       - name: Create application version
+#         run: |
+#           aws elasticbeanstalk create-application-version \
+#             --application-name ${{ needs.deploy-infrastructure.outputs.application-name }} \
+#             --version-label ${{ env.VERSION_LABEL }} \
+#             --source-bundle S3Bucket=${{ needs.deploy-infrastructure.outputs.s3-bucket }},S3Key=${{ env.VERSION_LABEL }}.zip \
+#             --description "Deployed from GitHub Actions - Commit: ${{ github.sha }}"
+
+#       - name: Deploy to Elastic Beanstalk
+#         run: |
+#           aws elasticbeanstalk update-environment \
+#             --application-name ${{ needs.deploy-infrastructure.outputs.application-name }} \
+#             --environment-name ${{ needs.deploy-infrastructure.outputs.environment-name }} \
+#             --version-label ${{ env.VERSION_LABEL }}
+
+#       - name: Wait for deployment
+#         run: |
+#           echo "Waiting for deployment to complete..."
+#           aws elasticbeanstalk wait environment-updated \
+#             --application-name ${{ needs.deploy-infrastructure.outputs.application-name }} \
+#             --environment-name ${{ needs.deploy-infrastructure.outputs.environment-name }}
+
+#       - name: Get application URL
+#         run: |
+#           URL=$(aws cloudformation describe-stacks \
+#             --stack-name ${{ env.STACK_NAME }} \
+#             --query 'Stacks[0].Outputs[?OutputKey==`ApplicationURL`].OutputValue' \
+#             --output text)
+#           echo "Application deployed successfully!"
+#           echo "URL: $URL"
+
 name: CI/CD Pipeline
 
 on:
@@ -33,6 +219,17 @@ jobs:
       - name: Build application
         run: npm run build
 
+      # Upload build artifacts to share between jobs
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-files
+          path: |
+            dist/
+            package.json
+            package-lock.json
+          retention-days: 1
+
   deploy-infrastructure:
     needs: test
     runs-on: ubuntu-latest
@@ -52,15 +249,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Get latest Node.js solution stack
-        id: solution-stack
-        run: |
-          STACK_NAME=$(aws elasticbeanstalk list-available-solution-stacks \
-            --query 'SolutionStacks[?contains(@, `Node.js 18`) && contains(@, `Amazon Linux`)]' \
-            --output text | head -1)
-          echo "Found solution stack: $STACK_NAME"
-          echo "stack-name=$STACK_NAME" >> $GITHUB_OUTPUT
 
       - name: Deploy CloudFormation stack
         run: |
@@ -105,18 +293,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-          cache: "npm"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build application
-        run: npm run build
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -124,28 +300,94 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # Download the build artifacts from the test job
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-files
+
+      # Verify the dist folder exists
+      - name: Verify build files
+        run: |
+          echo "Checking if dist folder exists..."
+          ls -la
+          if [ -d "dist" ]; then
+            echo "✅ dist folder found"
+            echo "Contents of dist:"
+            ls -la dist/
+          else
+            echo "❌ dist folder not found"
+            echo "Available files:"
+            find . -name "dist" -o -name "build" -o -name "*.js" -o -name "*.html" | head -20
+            exit 1
+          fi
+
+      # Install production dependencies (if needed for runtime)
+      - name: Install production dependencies
+        run: |
+          # Only install production dependencies
+          npm ci --only=production
+
       - name: Create deployment package
         run: |
-          # Create deployment package with built app
           echo "Creating deployment package..."
           mkdir -p deployment-package
 
-          cp -r dist deployment-package/
+          # Copy built application files
+          if [ -d "dist" ]; then
+            cp -r dist/* deployment-package/
+            echo "✅ Copied dist contents to deployment root"
+          else
+            echo "❌ dist folder not found!"
+            exit 1
+          fi
 
+          # Copy necessary files
           cp package.json deployment-package/
-          cp -r .ebextensions deployment-package/ 2>/dev/null || true
-          cp Procfile deployment-package/ 2>/dev/null || true
+
+          # Copy node_modules if they exist (for production dependencies)
+          if [ -d "node_modules" ]; then
+            cp -r node_modules deployment-package/
+            echo "✅ Copied node_modules"
+          fi
+
+          # Copy optional files if they exist
+          [ -d ".ebextensions" ] && cp -r .ebextensions deployment-package/ && echo "✅ Copied .ebextensions"
+          [ -f "Procfile" ] && cp Procfile deployment-package/ && echo "✅ Copied Procfile"
+
+          # Create a simple server.js if it doesn't exist (for Node.js apps that serve static files)
+          if [ ! -f "deployment-package/server.js" ] && [ ! -f "deployment-package/app.js" ]; then
+            cat > deployment-package/server.js << 'EOF'
+          const express = require('express');
+          const path = require('path');
+          const app = express();
+          const port = process.env.PORT || 8080;
+
+          // Serve static files
+          app.use(express.static('.'));
+
+          // Handle SPA routing (serve index.html for all routes)
+          app.get('*', (req, res) => {
+            res.sendFile(path.join(__dirname, 'index.html'));
+          });
+
+          app.listen(port, () => {
+            console.log(`Server running on port ${port}`);
+          });
+          EOF
+            echo "✅ Created server.js for static file serving"
+          fi
 
           echo "Contents of deployment-package:"
-          find deployment-package -type f
+          find deployment-package -type f | head -20
 
           # Create zip file
           cd deployment-package
           zip -r ../deployment-package.zip .
           cd ..
 
-          echo "Contents of zip file:"
-          unzip -l deployment-package.zip | head -20
+          echo "Zip file created. Size:"
+          ls -lh deployment-package.zip
 
       - name: Upload to S3
         run: |
