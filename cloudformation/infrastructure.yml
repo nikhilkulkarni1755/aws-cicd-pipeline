@@ -21,6 +21,11 @@ Parameters:
       - t3.medium
     Description: EC2 instance type
 
+  SolutionStackName:
+    Type: String
+    Default: "64bit Amazon Linux 2023 v6.3.0 running Node.js 18"
+    Description: Elastic Beanstalk solution stack name
+
 Resources:
   # S3 Bucket for storing application versions
   S3Bucket:
@@ -87,8 +92,7 @@ Resources:
       ApplicationName: !Ref Application
       EnvironmentName: !Ref EnvironmentName
       Description: Production environment for React app
-      # SolutionStackName: "64bit Amazon Linux 2 v5.8.4 running Node.js 18"
-      SolutionStackName: "64bit Amazon Linux 2023 running Node.js 20"
+      SolutionStackName: !Ref SolutionStackName
       OptionSettings:
         # Instance settings
         - Namespace: aws:ec2:instances

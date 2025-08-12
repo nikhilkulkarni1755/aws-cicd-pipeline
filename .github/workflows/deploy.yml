@@ -53,6 +53,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Get latest Node.js solution stack
+        id: solution-stack
+        run: |
+          STACK_NAME=$(aws elasticbeanstalk list-available-solution-stacks \
+            --query 'SolutionStacks[?contains(@, `Node.js 18`) && contains(@, `Amazon Linux`)]' \
+            --output text | head -1)
+          echo "Found solution stack: $STACK_NAME"
+          echo "stack-name=$STACK_NAME" >> $GITHUB_OUTPUT
+
       - name: Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
@@ -62,6 +71,7 @@ jobs:
             --parameter-overrides \
               ApplicationName=${{ env.APPLICATION_NAME }} \
               EnvironmentName=${{ env.APPLICATION_NAME }}-prod \
+              SolutionStackName="${{ steps.solution-stack.outputs.stack-name }}" \
             --no-fail-on-empty-changeset
 
       - name: Get stack outputs
