@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "echo 'No tests yet' && exit 0",
-    "start": "serve -s dist -l 5000"
+    "start": "serve -s dist -l 8080"
   },
   "dependencies": {
     "react": "^19.1.1",
