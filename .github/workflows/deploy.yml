@@ -127,15 +127,25 @@ jobs:
       - name: Create deployment package
         run: |
           # Create deployment package with built app
+          echo "Creating deployment package..."
+          mkdir -p deployment-package
+
           cp -r dist deployment-package/
+
           cp package.json deployment-package/
           cp -r .ebextensions deployment-package/ 2>/dev/null || true
           cp Procfile deployment-package/ 2>/dev/null || true
+
+          echo "Contents of deployment-package:"
+          find deployment-package -type f
 
           # Create zip file
           cd deployment-package
           zip -r ../deployment-package.zip .
           cd ..
+
+          echo "Contents of zip file:"
+          unzip -l deployment-package.zip | head -20
 
       - name: Upload to S3
         run: |
