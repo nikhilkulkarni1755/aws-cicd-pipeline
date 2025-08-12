@@ -1,0 +1,187 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  APPLICATION_NAME: full-cicd
+  STACK_NAME: full-cicd-infrastructure
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --run --reporter=verbose
+
+      - name: Build application
+        run: npm run build
+
+  deploy-infrastructure:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      s3-bucket: ${{ steps.stack-outputs.outputs.s3-bucket }}
+      application-name: ${{ steps.stack-outputs.outputs.application-name }}
+      environment-name: ${{ steps.stack-outputs.outputs.environment-name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create initial deployment package
+        run: |
+          # Create a minimal package for initial stack creation
+          mkdir -p initial-package/dist
+          echo '<!DOCTYPE html><html><body><h1>Deploying...</h1></body></html>' > initial-package/dist/index.html
+          echo '{"name": "initial", "version": "1.0.0", "scripts": {"start": "echo starting"}}' > initial-package/package.json
+          cd initial-package && zip -r ../initial-version.zip .
+
+      - name: Upload initial package to S3 (if bucket exists)
+        run: |
+          # Check if bucket exists, if not, skip this step
+          if aws s3 ls s3://${{ env.APPLICATION_NAME }}-deployments-${{ secrets.AWS_ACCOUNT_ID }} 2>/dev/null; then
+            aws s3 cp initial-version.zip s3://${{ env.APPLICATION_NAME }}-deployments-${{ secrets.AWS_ACCOUNT_ID }}/initial-version.zip
+          else
+            echo "Bucket doesn't exist yet, will be created by CloudFormation"
+          fi
+
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --template-file cloudformation/infrastructure.yml \
+            --stack-name ${{ env.STACK_NAME }} \
+            --capabilities CAPABILITY_IAM \
+            --parameter-overrides \
+              ApplicationName=${{ env.APPLICATION_NAME }} \
+              EnvironmentName=${{ env.APPLICATION_NAME }}-prod \
+            --no-fail-on-empty-changeset
+
+      - name: Upload initial package after stack creation
+        run: |
+          # Now upload the initial package after the bucket is created
+          aws s3 cp initial-version.zip s3://${{ env.APPLICATION_NAME }}-deployments-${{ secrets.AWS_ACCOUNT_ID }}/initial-version.zip
+
+      - name: Get stack outputs
+        id: stack-outputs
+        run: |
+          S3_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`S3Bucket`].OutputValue' \
+            --output text)
+
+          APP_NAME=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApplicationName`].OutputValue' \
+            --output text)
+
+          ENV_NAME=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`EnvironmentName`].OutputValue' \
+            --output text)
+
+          echo "s3-bucket=$S3_BUCKET" >> $GITHUB_OUTPUT
+          echo "application-name=$APP_NAME" >> $GITHUB_OUTPUT
+          echo "environment-name=$ENV_NAME" >> $GITHUB_OUTPUT
+
+  deploy-application:
+    needs: [test, deploy-infrastructure]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create deployment package
+        run: |
+          # Create deployment package with built app
+          cp -r dist deployment-package/
+          cp package.json deployment-package/
+          cp -r .ebextensions deployment-package/ 2>/dev/null || true
+          cp Procfile deployment-package/ 2>/dev/null || true
+
+          # Create zip file
+          cd deployment-package
+          zip -r ../deployment-package.zip .
+          cd ..
+
+      - name: Upload to S3
+        run: |
+          VERSION_LABEL="v${{ github.run_number }}-$(date +%Y%m%d-%H%M%S)"
+          aws s3 cp deployment-package.zip s3://${{ needs.deploy-infrastructure.outputs.s3-bucket }}/${VERSION_LABEL}.zip
+          echo "VERSION_LABEL=${VERSION_LABEL}" >> $GITHUB_ENV
+
+      - name: Create application version
+        run: |
+          aws elasticbeanstalk create-application-version \
+            --application-name ${{ needs.deploy-infrastructure.outputs.application-name }} \
+            --version-label ${{ env.VERSION_LABEL }} \
+            --source-bundle S3Bucket=${{ needs.deploy-infrastructure.outputs.s3-bucket }},S3Key=${{ env.VERSION_LABEL }}.zip \
+            --description "Deployed from GitHub Actions - Commit: ${{ github.sha }}"
+
+      - name: Deploy to Elastic Beanstalk
+        run: |
+          aws elasticbeanstalk update-environment \
+            --application-name ${{ needs.deploy-infrastructure.outputs.application-name }} \
+            --environment-name ${{ needs.deploy-infrastructure.outputs.environment-name }} \
+            --version-label ${{ env.VERSION_LABEL }}
+
+      - name: Wait for deployment
+        run: |
+          echo "Waiting for deployment to complete..."
+          aws elasticbeanstalk wait environment-updated \
+            --application-name ${{ needs.deploy-infrastructure.outputs.application-name }} \
+            --environment-name ${{ needs.deploy-infrastructure.outputs.environment-name }}
+
+      - name: Get application URL
+        run: |
+          URL=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query 'Stacks[0].Outputs[?OutputKey==`ApplicationURL`].OutputValue' \
+            --output text)
+          echo "Application deployed successfully!"
+          echo "URL: $URL"
