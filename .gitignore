@@ -1,2 +1,2 @@
-full-cicd/node_modules
-full-cicd/.env
+node_modules
+.env
