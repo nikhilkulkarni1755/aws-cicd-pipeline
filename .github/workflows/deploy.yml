@@ -53,23 +53,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Create initial deployment package
-        run: |
-          # Create a minimal package for initial stack creation
-          mkdir -p initial-package/dist
-          echo '<!DOCTYPE html><html><body><h1>Deploying...</h1></body></html>' > initial-package/dist/index.html
-          echo '{"name": "initial", "version": "1.0.0", "scripts": {"start": "echo starting"}}' > initial-package/package.json
-          cd initial-package && zip -r ../initial-version.zip .
-
-      - name: Upload initial package to S3 (if bucket exists)
-        run: |
-          # Check if bucket exists, if not, skip this step
-          if aws s3 ls s3://${{ env.APPLICATION_NAME }}-deployments-${{ secrets.AWS_ACCOUNT_ID }} 2>/dev/null; then
-            aws s3 cp initial-version.zip s3://${{ env.APPLICATION_NAME }}-deployments-${{ secrets.AWS_ACCOUNT_ID }}/initial-version.zip
-          else
-            echo "Bucket doesn't exist yet, will be created by CloudFormation"
-          fi
-
       - name: Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
@@ -80,11 +63,6 @@ jobs:
               ApplicationName=${{ env.APPLICATION_NAME }} \
               EnvironmentName=${{ env.APPLICATION_NAME }}-prod \
             --no-fail-on-empty-changeset
-
-      - name: Upload initial package after stack creation
-        run: |
-          # Now upload the initial package after the bucket is created
-          aws s3 cp initial-version.zip s3://${{ env.APPLICATION_NAME }}-deployments-${{ secrets.AWS_ACCOUNT_ID }}/initial-version.zip
 
       - name: Get stack outputs
         id: stack-outputs

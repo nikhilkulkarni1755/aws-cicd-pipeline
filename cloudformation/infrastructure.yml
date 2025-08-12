@@ -80,22 +80,13 @@ Resources:
       ApplicationName: !Ref ApplicationName
       Description: React application deployed via CI/CD
 
-  # Application Version (initial)
-  ApplicationVersion:
-    Type: AWS::ElasticBeanstalk::ApplicationVersion
+  # Elastic Beanstalk Environment (without initial version)
+  Environment:
+    Type: AWS::ElasticBeanstalk::Environment
     Properties:
       ApplicationName: !Ref Application
-      Description: Initial version
-      SourceBundle:
-        S3Bucket: !Ref S3Bucket
-        S3Key: initial-version.zip
-
-  # Configuration Template
-  ConfigurationTemplate:
-    Type: AWS::ElasticBeanstalk::ConfigurationTemplate
-    Properties:
-      ApplicationName: !Ref Application
-      Description: Configuration template for React app
+      EnvironmentName: !Ref EnvironmentName
+      Description: Production environment for React app
       SolutionStackName: "64bit Amazon Linux 2 v5.8.4 running Node.js 18"
       OptionSettings:
         # Instance settings
@@ -135,16 +126,6 @@ Resources:
         - Namespace: aws:elasticbeanstalk:application:environment
           OptionName: NODE_ENV
           Value: production
-
-  # Elastic Beanstalk Environment
-  Environment:
-    Type: AWS::ElasticBeanstalk::Environment
-    Properties:
-      ApplicationName: !Ref Application
-      EnvironmentName: !Ref EnvironmentName
-      Description: Production environment for React app
-      TemplateName: !Ref ConfigurationTemplate
-      VersionLabel: !Ref ApplicationVersion
 
 Outputs:
   ApplicationURL:
