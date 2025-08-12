@@ -87,7 +87,8 @@ Resources:
       ApplicationName: !Ref Application
       EnvironmentName: !Ref EnvironmentName
       Description: Production environment for React app
-      SolutionStackName: "64bit Amazon Linux 2 v5.8.4 running Node.js 18"
+      # SolutionStackName: "64bit Amazon Linux 2 v5.8.4 running Node.js 18"
+      SolutionStackName: "64bit Amazon Linux 2023 running Node.js 20"
       OptionSettings:
         # Instance settings
         - Namespace: aws:ec2:instances
