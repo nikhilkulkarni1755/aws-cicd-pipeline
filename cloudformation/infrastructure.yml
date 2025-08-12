@@ -23,7 +23,7 @@ Parameters:
 
   SolutionStackName:
     Type: String
-    Default: "64bit Amazon Linux 2023 v6.3.0 running Node.js 18"
+    Default: "64bit Amazon Linux 2023 v6.6.3 running Node.js 22"
     Description: Elastic Beanstalk solution stack name
 
 Resources:

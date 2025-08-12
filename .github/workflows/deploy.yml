@@ -71,7 +71,7 @@ jobs:
             --parameter-overrides \
               ApplicationName=${{ env.APPLICATION_NAME }} \
               EnvironmentName=${{ env.APPLICATION_NAME }}-prod \
-              SolutionStackName="${{ steps.solution-stack.outputs.stack-name }}" \
+              SolutionStackName="64bit Amazon Linux 2023 v6.6.3 running Node.js 22" \
             --no-fail-on-empty-changeset
 
       - name: Get stack outputs
