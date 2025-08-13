@@ -132,11 +132,6 @@ Resources:
           OptionName: NODE_ENV
           Value: production
 
-        # Node.js specific settings
-        - Namespace: aws:elasticbeanstalk:container:nodejs
-          OptionName: NodeCommand
-          Value: "npm start"
-
 Outputs:
   ApplicationURL:
     Description: URL of the deployed application
