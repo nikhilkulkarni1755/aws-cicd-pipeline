@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: "Elastic Beanstalk environment for React app"
+Description: "Elastic Beanstalk infrastructure for full-cicd application"
 
 Parameters:
   ApplicationName:
@@ -83,7 +83,7 @@ Resources:
     Type: AWS::ElasticBeanstalk::Application
     Properties:
       ApplicationName: !Ref ApplicationName
-      Description: React application deployed via CI/CD
+      Description: Full CI/CD Node.js application
 
   # Elastic Beanstalk Environment (without initial version)
   Environment:
@@ -91,7 +91,7 @@ Resources:
     Properties:
       ApplicationName: !Ref Application
       EnvironmentName: !Ref EnvironmentName
-      Description: Production environment for React app
+      Description: Production environment for full-cicd app
       SolutionStackName: !Ref SolutionStackName
       OptionSettings:
         # Instance settings
@@ -131,6 +131,11 @@ Resources:
         - Namespace: aws:elasticbeanstalk:application:environment
           OptionName: NODE_ENV
           Value: production
+
+        # Node.js specific settings
+        - Namespace: aws:elasticbeanstalk:container:nodejs
+          OptionName: NodeCommand
+          Value: "npm start"
 
 Outputs:
   ApplicationURL:
