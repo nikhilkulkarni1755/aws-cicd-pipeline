@@ -28,20 +28,18 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm test -- --run --reporter=verbose
+        run: npm test
 
-      - name: Build application
-        run: npm run build
-
-      # Upload build artifacts to share between jobs
-      - name: Upload build artifacts
+      # Upload source files to share between jobs
+      - name: Upload source files
         uses: actions/upload-artifact@v4
         with:
-          name: build-files
+          name: source-files
           path: |
-            dist/
             package.json
             package-lock.json
+            server.js
+            public/
           retention-days: 1
 
   deploy-infrastructure:
@@ -114,89 +112,55 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # Download the build artifacts from the test job
-      - name: Download build artifacts
+      # Download the source files from the test job
+      - name: Download source files
         uses: actions/download-artifact@v4
         with:
-          name: build-files
+          name: source-files
 
-      # Verify the dist folder exists
-      - name: Verify build files
+      # Verify the source files exist
+      - name: Verify source files
         run: |
-          echo "Checking if dist folder exists..."
+          echo "Checking if required files exist..."
           ls -la
-          if [ -d "dist" ]; then
-            echo "✅ dist folder found"
-            echo "Contents of dist:"
-            ls -la dist/
+
+          if [ -f "package.json" ]; then
+            echo "✅ package.json found"
           else
-            echo "❌ dist folder not found"
-            echo "Available files:"
-            find . -name "dist" -o -name "build" -o -name "*.js" -o -name "*.html" | head -20
+            echo "❌ package.json not found"
             exit 1
           fi
 
-      - name: Create deployment package for React SPA
+          if [ -f "server.js" ]; then
+            echo "✅ server.js found"
+          else
+            echo "❌ server.js not found"
+            exit 1
+          fi
+
+          if [ -d "public" ]; then
+            echo "✅ public folder found"
+            echo "Contents of public:"
+            ls -la public/
+          else
+            echo "❌ public folder not found"
+            exit 1
+          fi
+
+      - name: Create deployment package for Node.js app
         run: |
-          echo "Creating deployment package for React SPA..."
+          echo "Creating deployment package for Node.js app..."
 
-          # Verify dist folder exists
-          if [ ! -d "dist" ]; then
-            echo "❌ dist folder not found!"
-            ls -la
-            exit 1
-          fi
-
-          # Create deployment package
+          # Create deployment package directory
           mkdir deployment-package
 
-          # Copy React build files
-          cp -r dist/* deployment-package/
-          echo "✅ Copied React build files"
-
-          # Copy package.json (needed for Node.js platform detection)
+          # Copy all necessary files
           cp package.json deployment-package/
+          cp package-lock.json deployment-package/
+          cp server.js deployment-package/
+          cp -r public deployment-package/
 
-      - name: Create server.js for SPA routing
-        run: |
-          cat > deployment-package/server.js << 'EOF'
-          const express = require('express');
-          const path = require('path');
-          const app = express();
-          const port = process.env.PORT || 8080;
-
-          // Serve static files
-          app.use(express.static(__dirname));
-
-          // SPA fallback - serve index.html for all routes
-          app.get('*', (req, res) => {
-            res.sendFile(path.join(__dirname, 'index.html'));
-          });
-
-          app.listen(port, () => {
-            console.log('Server running on port ' + port);
-          });
-          EOF
-
-      - name: Update package.json
-        run: |
-          cd deployment-package
-
-          # Add express to dependencies and start script
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.scripts = pkg.scripts || {};
-            pkg.scripts.start = 'node server.js';
-            pkg.dependencies = pkg.dependencies || {};
-            if (!pkg.dependencies.express) {
-              pkg.dependencies.express = '^4.18.0';
-            }
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-            console.log('✅ Updated package.json');
-          "
-
-          cd ..
+          echo "✅ Copied all Node.js app files"
 
       - name: Create deployment zip
         run: |
